@@ -16,7 +16,6 @@ python-socketio==5.8.0
 eventlet==0.33.3
 Pillow>=10.0.1,<11.0
 gunicorn==21.2.0
-pyaudio==0.2.14
 Werkzeug==2.3.7
 
 # Optional dependencies

@@ -12,6 +12,16 @@ import numpy as np
 import signal
 
 # -----------------------
+# Voice module conditional
+# -----------------------
+try:
+    import pyaudio
+    voice_enabled = True
+except ImportError:
+    voice_enabled = False
+    print("⚠️ PyAudio missing, voice commands disabled on backend.")
+
+# -----------------------
 # Logging configuration
 # -----------------------
 LOG_FILE = 'ai_mouse.log'
@@ -61,7 +71,6 @@ def safe_int(val, default):
         return default
 
 def create_error_frame(message, width=640, height=480):
-    """Create a visually clear error frame (numpy array)"""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     for i in range(height):
         color = int(30 + (i / height) * 70)
@@ -153,7 +162,6 @@ def start_gesture():
             data = request.get_json() or {}
             sensitivity = safe_float(data.get('sensitivity', 1.2), 1.2)
             smoothing = safe_int(data.get('smoothing', 5), 5)
-
             sensitivity = max(0.1, min(3.0, sensitivity))
             smoothing = max(1, min(15, smoothing))
 
@@ -219,14 +227,14 @@ def stop_gesture():
 # --- Voice control routes ---
 @app.route('/start_voice', methods=['POST'])
 def start_voice():
+    if not voice_enabled:
+        return jsonify({"status": "error", "message": "Voice commands disabled on backend"}), 503
     with app_state.lock:
         if app_state.is_voice_running:
             return jsonify({"status": "already_running", "message": "Voice recognition already running"})
-
         try:
             if not getattr(ai_mouse, 'voice_recognizer', None):
                 ai_mouse.initialize_voice()
-
             if not getattr(ai_mouse, 'voice_recognizer', None):
                 logger.error("Voice recognizer not available after initialization")
                 return jsonify({"status": "error", "message": "Voice recognition not available. Check microphone."}), 500
@@ -248,6 +256,8 @@ def start_voice():
 
 @app.route('/stop_voice', methods=['POST'])
 def stop_voice():
+    if not voice_enabled:
+        return jsonify({"status": "error", "message": "Voice commands disabled on backend"}), 503
     with app_state.lock:
         try:
             if hasattr(ai_mouse, 'voice_mode'):
@@ -335,7 +345,6 @@ def handle_adjust_settings(data):
             ai_mouse.sensitivity = max(0.1, min(3.0, float(data['sensitivity'])))
         if 'smoothing' in data:
             ai_mouse.smoothing_factor = max(1, min(15, int(data['smoothing'])))
-
         socketio.emit('settings_updated', {
             'sensitivity': ai_mouse.sensitivity,
             'smoothing': ai_mouse.smoothing_factor
@@ -362,10 +371,8 @@ def shutdown_handler(signum, frame):
                 if hasattr(ai_mouse, 'voice_mode'):
                     ai_mouse.voice_mode = False
                 app_state.is_voice_running = False
-
         safe_join_thread(app_state.gesture_thread, timeout=2.0)
         safe_join_thread(app_state.voice_thread, timeout=2.0)
-
         try:
             ai_mouse.cleanup()
         except Exception:
@@ -380,12 +387,11 @@ signal.signal(signal.SIGINT, shutdown_handler)
 signal.signal(signal.SIGTERM, shutdown_handler)
 
 # -----------------------
-# Run server (FINAL for Render)
+# Run server
 # -----------------------
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     host = '0.0.0.0'
-
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
 
     print(f"🚀 Starting AI Virtual Mouse Backend on {host}:{port}")
