@@ -1,5 +1,3 @@
-# File: backend/app.py - PRODUCTION-READY, THREAD-SAFE, FULL-FEATURED
-
 from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO
@@ -65,11 +63,9 @@ def safe_int(val, default):
 def create_error_frame(message, width=640, height=480):
     """Create a visually clear error frame (numpy array)"""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
-    # subtle vertical gradient
     for i in range(height):
         color = int(30 + (i / height) * 70)
         cv2.line(frame, (0, i), (width, i), (color, color, color), 1)
-    # Titles & message
     cv2.putText(frame, "AI Virtual Mouse", (max(20, width//2 - 180), max(40, height//2 - 60)),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
     cv2.putText(frame, message, (max(20, width//2 - 220), height//2),
@@ -79,21 +75,18 @@ def create_error_frame(message, width=640, height=480):
     return frame
 
 def add_ui_overlay(frame, gesture):
-    """Add a small UI overlay (status + gesture) to the frame"""
     h, w = frame.shape[:2]
     overlay = frame.copy()
     rect_h = 110
     cv2.rectangle(overlay, (10, 10), (w - 10, rect_h), (0, 0, 0), -1)
     alpha = 0.35
     cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
-    # Text
     cv2.putText(frame, "AI Virtual Mouse - Active", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     cv2.putText(frame, f"Gesture: {gesture}", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     cv2.putText(frame, f"Status: {'Active' if app_state.is_gesture_running else 'Inactive'}", (20, 95),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
 def safe_join_thread(thread, timeout=2.0):
-    """Attempt to join a thread gracefully (best-effort)"""
     if thread and thread.is_alive():
         thread.join(timeout)
 
@@ -119,7 +112,6 @@ def home():
 
 @app.route('/health')
 def health():
-    """Health check with camera and system info"""
     try:
         camera_available = False
         camera_status = "not_initialized"
@@ -162,15 +154,12 @@ def start_gesture():
             sensitivity = safe_float(data.get('sensitivity', 1.2), 1.2)
             smoothing = safe_int(data.get('smoothing', 5), 5)
 
-            # clamp
             sensitivity = max(0.1, min(3.0, sensitivity))
             smoothing = max(1, min(15, smoothing))
 
-            # apply to ai_mouse
             ai_mouse.sensitivity = sensitivity
             ai_mouse.smoothing_factor = smoothing
 
-            # camera initialization with retries
             max_retries = 3
             for attempt in range(max_retries):
                 try:
@@ -190,7 +179,6 @@ def start_gesture():
                 logger.error("Camera unavailable after retries")
                 return jsonify({"status": "error", "message": "Camera not available. Please check the connection."}), 500
 
-            # Start the gesture processing thread
             app_state.gesture_thread = threading.Thread(
                 target=ai_mouse.process_gestures,
                 args=(socketio,),
@@ -217,15 +205,10 @@ def start_gesture():
 def stop_gesture():
     with app_state.lock:
         try:
-            # Signal ai_mouse to stop (assumes ai_mouse respects is_active)
             setattr(ai_mouse, 'is_active', False)
             app_state.is_gesture_running = False
-
-            # release dragging flag if present
             if getattr(ai_mouse, 'is_dragging', False):
                 ai_mouse.is_dragging = False
-
-            # attempt thread join (best-effort)
             safe_join_thread(app_state.gesture_thread, timeout=2.0)
             logger.info("Gesture recognition stopped")
             return jsonify({"status": "stopped", "message": "Gesture recognition stopped"})
@@ -241,7 +224,6 @@ def start_voice():
             return jsonify({"status": "already_running", "message": "Voice recognition already running"})
 
         try:
-            # initialize voice if not present
             if not getattr(ai_mouse, 'voice_recognizer', None):
                 ai_mouse.initialize_voice()
 
@@ -268,11 +250,9 @@ def start_voice():
 def stop_voice():
     with app_state.lock:
         try:
-            # signal stop
             if hasattr(ai_mouse, 'voice_mode'):
                 ai_mouse.voice_mode = False
             app_state.is_voice_running = False
-
             safe_join_thread(app_state.voice_thread, timeout=2.0)
             logger.info("Voice recognition stopped")
             return jsonify({"status": "stopped", "message": "Voice recognition stopped"})
@@ -286,12 +266,9 @@ def stop_voice():
 @app.route('/video_feed')
 def video_feed():
     def generate_frames():
-        # Keep serving frames while server runs (or while gesture is active)
         while True:
             try:
-                # Prefer streaming while gesture thread is running; but allow viewing even if not
                 if not getattr(ai_mouse, 'cap', None) or not ai_mouse.cap.isOpened():
-                    # yield an informative image while waiting
                     error_frame = create_error_frame("Camera not available")
                     ret, jpeg = cv2.imencode('.jpg', error_frame)
                     if ret:
@@ -306,10 +283,8 @@ def video_feed():
                     time.sleep(0.02)
                     continue
 
-                # Optional flip
                 frame = cv2.flip(frame, 1)
 
-                # Draw landmarks if hands module available
                 if getattr(ai_mouse, 'hands', None) and getattr(ai_mouse, 'mp_draw', None) and getattr(ai_mouse, 'mp_hands', None):
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     results = ai_mouse.hands.process(frame_rgb)
@@ -321,21 +296,17 @@ def video_feed():
                                 ai_mouse.mp_draw.DrawingSpec(color=(0, 0, 255), thickness=2)
                             )
 
-                # add minimal UI overlay
                 gesture_text = ai_mouse.current_gesture.value if getattr(ai_mouse, 'current_gesture', None) else "NO_HAND"
                 add_ui_overlay(frame, gesture_text)
 
-                # encode and yield
                 ret, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
                 if ret:
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
 
-                # limit CPU by small sleep (approx ~30 fps)
                 time.sleep(0.03)
             except Exception as e:
                 logger.exception("Error in video feed generator")
-                # Sleep briefly before retry
                 time.sleep(0.1)
 
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
@@ -383,7 +354,6 @@ def handle_ping():
 def shutdown_handler(signum, frame):
     logger.info("Shutdown signal received, cleaning up...")
     try:
-        # stop gesture and voice processing
         with app_state.lock:
             if app_state.is_gesture_running:
                 setattr(ai_mouse, 'is_active', False)
@@ -396,7 +366,6 @@ def shutdown_handler(signum, frame):
         safe_join_thread(app_state.gesture_thread, timeout=2.0)
         safe_join_thread(app_state.voice_thread, timeout=2.0)
 
-        # final ai_mouse cleanup
         try:
             ai_mouse.cleanup()
         except Exception:
@@ -405,47 +374,38 @@ def shutdown_handler(signum, frame):
         logger.exception("Error during shutdown")
     finally:
         logger.info("Shutdown complete")
-        # allow process to exit
         sys.exit(0)
 
 signal.signal(signal.SIGINT, shutdown_handler)
 signal.signal(signal.SIGTERM, shutdown_handler)
 
 # -----------------------
-# Run server
+# Run server (FINAL for Render)
 # -----------------------
 if __name__ == '__main__':
-    logger.info("Starting AI Virtual Mouse Server on http://0.0.0.0:5000")
-    logger.info("Features: hand gesture, voice commands, real-time video stream, robust logging")
+    port = int(os.environ.get('PORT', 5000))
+    host = '0.0.0.0'
+
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+
+    print(f"🚀 Starting AI Virtual Mouse Backend on {host}:{port}")
+    print(f"🌐 Environment: {'PRODUCTION' if port != 5000 else 'DEVELOPMENT'}")
+
     try:
-        socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
-    except Exception:
+        if debug_mode or port == 5000:
+            socketio.run(app, host=host, port=port, debug=debug_mode)
+        else:
+            try:
+                import eventlet
+                eventlet.monkey_patch()
+                socketio.run(app, host=host, port=port, debug=False)
+            except ImportError:
+                print("⚠️ Eventlet not available, using development server")
+                socketio.run(app, host=host, port=port, debug=False)
+    except Exception as e:
         logger.exception("Server failed to start")
         try:
             ai_mouse.cleanup()
         except Exception:
             logger.exception("ai_mouse.cleanup failed on server error")
         sys.exit(1)
-        
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    host = '0.0.0.0'
-    
-    # Use environment variable for production
-    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
-    
-    print(f"🚀 Starting AI Virtual Mouse Backend on {host}:{port}")
-    print(f"🌐 Environment: {'PRODUCTION' if port != 5000 else 'DEVELOPMENT'}")
-    
-    if debug_mode or port == 5000:
-        # Development server
-        socketio.run(app, host=host, port=port, debug=debug_mode)
-    else:
-        # Production server with eventlet
-        try:
-            import eventlet
-            eventlet.monkey_patch()
-            socketio.run(app, host=host, port=port, debug=False)
-        except ImportError:
-            print("⚠️ Eventlet not available, using development server")
-            socketio.run(app, host=host, port=port, debug=False)
