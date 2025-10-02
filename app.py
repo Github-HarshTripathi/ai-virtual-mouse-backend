@@ -11,6 +11,7 @@ import sys
 import numpy as np
 import signal
 
+
 # -----------------------
 # Logging configuration
 # -----------------------
@@ -25,12 +26,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger('ai_virtual_mouse_backend')
 
+
 # -----------------------
 # Flask + SocketIO setup
 # -----------------------
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+
+# Example: replace '*' with your frontend domain for security
+CORS(app, resources={r"/*": {"origins": ["https://yourfrontend.vercel.app"]}})
+
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', logger=True, engineio_logger=True)
+
 
 # -----------------------
 # Thread-safe application state
@@ -43,7 +49,9 @@ class AppState:
         self.voice_thread = None
         self.lock = threading.Lock()
 
+
 app_state = AppState()
+
 
 # -----------------------
 # Helpers
@@ -54,11 +62,13 @@ def safe_float(val, default):
     except Exception:
         return default
 
+
 def safe_int(val, default):
     try:
         return int(val)
     except Exception:
         return default
+
 
 def create_error_frame(message, width=640, height=480):
     """Create a visually clear error frame (numpy array)"""
@@ -74,6 +84,7 @@ def create_error_frame(message, width=640, height=480):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
     return frame
 
+
 def add_ui_overlay(frame, gesture):
     h, w = frame.shape[:2]
     overlay = frame.copy()
@@ -86,9 +97,11 @@ def add_ui_overlay(frame, gesture):
     cv2.putText(frame, f"Status: {'Active' if app_state.is_gesture_running else 'Inactive'}", (20, 95),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
+
 def safe_join_thread(thread, timeout=2.0):
     if thread and thread.is_alive():
         thread.join(timeout)
+
 
 # -----------------------
 # Routes
@@ -109,6 +122,7 @@ def home():
             "health": "/health (GET)"
         }
     })
+
 
 @app.route('/health')
 def health():
@@ -132,6 +146,7 @@ def health():
         logger.exception("Health check failed")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
 @app.route('/status')
 def status():
     return jsonify({
@@ -141,6 +156,7 @@ def status():
         "current_gesture": ai_mouse.current_gesture.value if getattr(ai_mouse, 'current_gesture', None) else "NO_HAND",
         "camera_connected": getattr(ai_mouse, 'cap', None) and ai_mouse.cap.isOpened()
     })
+
 
 # --- Gesture control routes ---
 @app.route('/start_gesture', methods=['POST'])
@@ -201,6 +217,7 @@ def start_gesture():
             app_state.is_gesture_running = False
             return jsonify({"status": "error", "message": str(e)}), 500
 
+
 @app.route('/stop_gesture', methods=['POST'])
 def stop_gesture():
     with app_state.lock:
@@ -215,6 +232,7 @@ def stop_gesture():
         except Exception as e:
             logger.exception("Error stopping gesture recognition")
             return jsonify({"status": "error", "message": str(e)}), 500
+
 
 # --- Voice control routes ---
 @app.route('/start_voice', methods=['POST'])
@@ -246,6 +264,7 @@ def start_voice():
             app_state.is_voice_running = False
             return jsonify({"status": "error", "message": str(e)}), 500
 
+
 @app.route('/stop_voice', methods=['POST'])
 def stop_voice():
     with app_state.lock:
@@ -259,6 +278,7 @@ def stop_voice():
         except Exception as e:
             logger.exception("Error stopping voice recognition")
             return jsonify({"status": "error", "message": str(e)}), 500
+
 
 # -----------------------
 # Video feed route
@@ -311,6 +331,7 @@ def video_feed():
 
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+
 # -----------------------
 # Socket events
 # -----------------------
@@ -324,9 +345,11 @@ def handle_connect():
         'version': '2.3.0'
     })
 
+
 @socketio.on('disconnect')
 def handle_disconnect():
     logger.info('Client disconnected')
+
 
 @socketio.on('adjust_settings')
 def handle_adjust_settings(data):
@@ -344,9 +367,11 @@ def handle_adjust_settings(data):
     except Exception:
         logger.exception("Failed to adjust settings")
 
+
 @socketio.on('ping')
 def handle_ping():
     socketio.emit('pong', {'timestamp': time.time()})
+
 
 # -----------------------
 # Graceful shutdown
@@ -376,11 +401,13 @@ def shutdown_handler(signum, frame):
         logger.info("Shutdown complete")
         sys.exit(0)
 
+
 signal.signal(signal.SIGINT, shutdown_handler)
 signal.signal(signal.SIGTERM, shutdown_handler)
 
+
 # -----------------------
-# Run server (FINAL for Render)
+# Run server (FINAL for production)
 # -----------------------
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
